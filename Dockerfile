@@ -18,13 +18,13 @@ RUN pip cache purge && pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libgl1-mesa-glx \
-    libglib2.0-0 \
+    libgl1 \
+    libglib2.0-0t64 \
     libsm6 \
     libxext6 \
     libxrender-dev \
     libcairo2-dev \
-    libatlas-base-dev \
+    libopenblas-dev \
     gfortran \
     && rm -rf /var/lib/apt/lists/*
 
