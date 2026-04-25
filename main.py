@@ -5,7 +5,7 @@ import random
 import shutil
 from contextlib import suppress
 
-import pytesseract
+import requests
 from PIL import Image
 from flask import Flask, request, jsonify
 from ultralytics import YOLO
@@ -19,6 +19,10 @@ click_captcha_model = YOLO("yolov8x.pt")
 
 
 BASE_IMAGE_DIR = "pictures"
+OCR_SERVICE_URL = os.getenv(
+    "OCR_SERVICE_URL",
+    "http://sellout-ai-chinese-symbols-image-analyzer:5000/chinese_symbols_image_analyse/extract_task"
+)
 TASKS_HASH_DICT = {
     "2bf11bf9b2eb332608299983efbc92610e5359b0997df6292518df061ca290b9": "bicycle",
     "2ea108720ebc70857e23391b5aef933369d0ae608ace6465d344e56f26f3c32e": "ball",
@@ -29,19 +33,6 @@ TASKS_HASH_DICT = {
     "a7e2c731b72cc41cbf24721a79c501236b882c70761aafc1d15778e5b0446f9c": "train",
     "b2ce4a42de22b08649333f21dc44a15ebd7f990b3f32c945191693f4c27b7ae3": "dog",
     "9f5de0c7edb5944ee32f86acc41ced9b750e3c32eee3406999133d0e6fd2a7ed": "coach",
-}
-
-TASK_D = {
-    "背包": "backpack",
-    "狗": "dog",
-    "火车": "train",
-    "自行车": "bicycle",
-    "汽车": "car",
-    "猫": "cat",
-    "沙发": "couch",
-    "马": "horse",
-    "船": "ship",
-    "球": "sports ball",
 }
 
 
@@ -116,10 +107,6 @@ def get_cell(image_size, cord):
     return i, j
 
 
-def to_normal_list(s):
-    return " ".join((" ".join(s.split(',')).split("，"))).split()
-
-
 def generate_random_point_in_rectangle(x1, y1, x2, y2):
     x_delta = x2 - x1
     y_delta = y2 - y1
@@ -128,12 +115,18 @@ def generate_random_point_in_rectangle(x1, y1, x2, y2):
     return random_x, random_y
 
 
-def process_click_captcha(blocks_image_path, task_image_path, size):
-    custom_config = '--oem 3 --psm 6 --user-words whitelist.txt'
-    task_tokens = to_normal_list(
-        pytesseract.image_to_string(task_image_path, lang="chi_sim", config=custom_config)
+def extract_task_labels_via_ocr_service(base64_task_image):
+    response = requests.post(
+        OCR_SERVICE_URL,
+        json={"task_image": base64_task_image},
+        timeout=20,
     )
-    task_labels = [TASK_D[token] for token in task_tokens if token in TASK_D]
+    response.raise_for_status()
+    payload = response.json()
+    return payload.get("labels", [])
+
+
+def process_click_captcha(blocks_image_path, task_labels, size):
     task_labels = task_labels + [""] * (4 - len(task_labels))
 
     predict = click_captcha_model.predict(blocks_image_path)[0]
@@ -218,28 +211,18 @@ def process_click_captcha_request(base64_blocks_image, base64_task_image, size):
     ensure_pictures_dir()
 
     blocks_image_data = base64.b64decode(base64_blocks_image)
-    task_image_data = base64.b64decode(base64_task_image)
+    task_labels = extract_task_labels_via_ocr_service(base64_task_image)
 
     blocks_image_path = f'{generate_random_name()}.png'
-    task_image_path = f'{generate_random_name()}.png'
 
     with open(blocks_image_path, 'wb') as f:
         f.write(blocks_image_data)
 
-    with open(task_image_path, 'wb') as f:
-        f.write(task_image_data)
-
-    original_image = Image.open(task_image_path)
-    resized_image = original_image.resize((original_image.size[0] * 2, original_image.size[1] * 2))
-    resized_image.save(task_image_path)
-
     try:
-        return process_click_captcha(blocks_image_path, task_image_path, size)
+        return process_click_captcha(blocks_image_path, task_labels, size)
     finally:
         with suppress(FileNotFoundError):
             os.remove(blocks_image_path)
-        with suppress(FileNotFoundError):
-            os.remove(task_image_path)
 
 
 @app.route('/captcha_images/solve_drag_images', methods=['POST'])
