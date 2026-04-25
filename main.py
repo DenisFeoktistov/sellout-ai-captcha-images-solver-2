@@ -45,6 +45,11 @@ TASK_D = {
 }
 
 
+@app.route('/health', methods=['GET'])
+def health():
+    return jsonify({"status": "ok"})
+
+
 def ensure_pictures_dir():
     os.makedirs(BASE_IMAGE_DIR, exist_ok=True)
 
